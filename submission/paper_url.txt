@@ -1,1 +1,77 @@
-PASTE-YOUR-DEPLOYED-PAPER-URL-HERE
+# Which Search Signals Predict Content Decline? A Signal Analysis of FlyRank's Content Dataset
+
+## Abstract
+
+This study asks which safe, observable content and search signals are associated with a page's visibility declining over time. Using FlyRank's anonymized content dataset (30,000 pages), we labeled pages as "declining" based on their trend direction and tested a hand-built rule-based baseline against a Random Forest classifier trained on content and engagement signals. After discovering and removing a critical data leakage issue — the raw trend-window impression columns nearly perfectly determined the label — the corrected Random Forest reached ROC-AUC 0.767 versus the baseline's 0.58, and correctly identified 98% of its top-50 highest-risk pages as truly declining versus 44% for the baseline. The strongest associated signals were how many days a page shows impressions, its average search position, and content age. These results are observational, not causal, and should guide review priority, not guarantee refresh outcomes.
+
+## Introduction / Problem Statement
+
+Content teams can't manually audit every page for search decline. The decision this work supports: given a large set of pages, which observable signals reliably flag pages worth reviewing before they lose more visibility? This matters because manual review doesn't scale, and a bad prioritization rule wastes review effort on pages that were never actually at risk.
+
+## Data
+
+- Source: FlyRank internship starter dataset, content_refresh_anonymized.csv (30,000 rows, 44 columns — anonymized content_id/client_id, no client names, domains, or URLs used anywhere in this analysis).
+- Label: is_declining_label = 1 if trend_direction == 'down' (16,262 of 30,000 rows, ~54%), else 0.
+- Excluded from features: identifiers (content_id, client_id), the label source (trend_direction), and — critically — trend_pct and the raw *_last_30d / *_prev_30d columns (see Methodology: leakage).
+
+## Methodology
+
+Baseline (deterministic, rule-based): a weighted score combining visibility (log impressions percentile), freshness risk (days since update), position opportunity, and content-depth gap — weights 0.40/0.30/0.25/0.05, exactly as specified in the repo's scripts/02_baseline_score.py.
+
+Model: Random Forest classifier (200 trees, min_samples_leaf=2), trained on a stratified 70/30 split (21,000 train / 9,000 validation rows).
+
+Leakage audit (important finding): The original feature set included trend_pct. Testing showed trend_pct is a near-exact function (correlation = 0.999999) of impressions_last_30d and impressions_prev_30d — because the label itself is derived from that same percentage change. Leaving these in the feature set produced a perfect model (ROC-AUC = 1.00), which is the textbook sign of leakage, not a good model. All three "last/prev 30-day" trio columns (impressions_last_30d, clicks_last_30d, sessions_last_30d, impressions_prev_30d, clicks_prev_30d, sessions_prev_30d) were removed along with trend_pct, leaving 23 clean numeric features describing a page's broader state (90-day cumulative activity, content characteristics, freshness, position) rather than the exact window the label was computed from.
+
+## Results
+
+| Metric | Baseline | Random Forest |
+|---|---|---|
+| ROC-AUC | 0.580 | 0.767 |
+| Precision@50 | 44.0% | 98.0% |
+
+Confusion matrix (Random Forest, validation set, threshold 0.5):
+
+| | Predicted stable | Predicted declining |
+|---|---|---|
+| Actually stable | 2,581 | 1,540 |
+| Actually declining | 1,174 | 3,705 |
+
+Top signals (permutation importance, ROC-AUC drop when shuffled):
+
+- days_with_impressions — how consistently a page has shown up in search over the window
+- avg_position — average ranking position
+- content_age_days — how old the content is
+- impressions_90d — cumulative visibility
+- ctr, char_count, word_count, scroll_rate — secondary signals
+
+Simple correlations with decline (direction matters — this is Lane 1's "effect size" requirement, not just "is there a link"):
+
+- days_with_impressions: +0.19 — pages visible on more days trend more toward decline (plausibly: long-visible pages are further past their peak)
+- content_age_days: −0.16 and age_tier_order: −0.16 — somewhat counterintuitively, newer content in this dataset shows a slightly higher decline rate than older content
+- word_count: +0.09, days_since_last_update: +0.08 — longer, staler content leans slightly toward decline
+- ctr: −0.06 — higher CTR pages lean slightly away from decline
+
+## Limitations & Honest Framing
+
+- These are observational associations, not causal claims — we watched, we did not experiment. Nothing here proves a Google ranking factor, and nothing here proves that refreshing a flagged page will reverse its trend.
+- Correlations above are individually weak-to-moderate (all under 0.2); no single signal is a reliable standalone predictor — the model's advantage comes from combining ~23 signals, not any one of them.
+- The counterintuitive age finding warrants caution: it may reflect how content was seeded/sampled in this anonymized dataset rather than a general SEO truth.
+- The leakage catch above is the single most important finding methodologically — it's a reminder that any "signal" too close to the label's own definition window will inflate results artificially.
+
+## Ranked Recommendations (action playbook)
+
+1. Prioritize review of pages with long-running visibility (days_with_impressions high) rather than only newly-published or freshly-declining ones — established pages showing this pattern deserve monitoring.
+2. Cross-check average position alongside impressions — pages slipping in position while remaining visible are a stronger flag than either signal alone.
+3. Treat content age and staleness (content_age_days, days_since_last_update) as secondary, supporting evidence, not primary triggers, given the weaker/mixed correlation direction found here.
+4. Use the combined model score (not any single metric) to rank review priority — the Random Forest's Precision@50 (98%) vastly outperforms picking by any one heuristic like the baseline's 44%.
+5. Always re-run a leakage check (like the one above) before trusting any new feature set on this data.
+
+## Reproducibility
+
+- Notebooks: notebooks/01_first_look_and_discovery.ipynb, 02_your_first_readable_model.ipynb, 03_working_with_the_full_release.ipynb
+- Reference pipeline: scripts/01_prepare_features.py → 05_build_pdf_report.py
+- This analysis: random_state=42 throughout, stratified 70/30 split, content_refresh_anonymized.csv
+
+## Acknowledgments & Data Credit
+
+Built on the FlyRank ML Internship dataset — flyrank.aiPASTE-YOUR-DEPLOYED-PAPER-URL-HERE
